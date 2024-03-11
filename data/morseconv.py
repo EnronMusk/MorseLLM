@@ -1,3 +1,14 @@
+def createMorseShakespear() -> None:
+
+    file = open('shakespeardata.txt')
+    content = file.read()
+    file.close()
+
+    en_content = encrypt(content)
+    with open('shakespear_encrypted.txt', 'w') as file:
+        file.write(en_content)
+    file.close()
+
 MORSE_CODE_DICT = { 'A':'.-', 'B':'-...',
                     'C':'-.-.', 'D':'-..', 'E':'.',
                     'F':'..-.', 'G':'--.', 'H':'....',
@@ -75,3 +86,4 @@ def decrypt(message):
                 citext = ''
  
     return decipher
+

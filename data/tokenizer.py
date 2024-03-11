@@ -1,4 +1,3 @@
-
 chars = " .-"
 
 def tokenize(string : str) -> list[int]:
