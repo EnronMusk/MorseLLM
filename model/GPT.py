@@ -15,8 +15,8 @@ n_layers = 6
 vocab_size = 3
 
 #other
-batch_size = 8
-context_len = 64
+batch_size = 4
+context_len = 8
 max_batches = 5000
 eval_iterative = 500
 
