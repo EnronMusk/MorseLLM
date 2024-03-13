@@ -1,4 +1,18 @@
-chars = " .-"
+import os
+import sys
+
+#For safe imports of everything
+notebook_directory = os.getcwd()
+parent_directory = os.path.dirname(notebook_directory)
+sys.path.insert(False, parent_directory)
+
+file = open(parent_directory + r'\\data\\shakespeardata.txt')
+content = file.read()
+file.close()
+
+chars = sorted(list(set(content)))
+
+# chars = " .-"
 
 def tokenize(string : str) -> list[int]:
 

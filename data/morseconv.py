@@ -58,7 +58,7 @@ def decrypt(message):
     decipher = ''
     citext = ''
     for letter in message:
- 
+        i = 0
         # checks for space
         if (letter != ' '):
  
@@ -81,8 +81,11 @@ def decrypt(message):
             else:
  
                 # accessing the keys using their values (reverse of encryption)
-                decipher += list(MORSE_CODE_DICT.keys())[list(MORSE_CODE_DICT
-                .values()).index(citext)]
+                try: #The model will not produce perfect morse, so try to decrypt.
+                    decipher += list(MORSE_CODE_DICT.keys())[list(MORSE_CODE_DICT
+                    .values()).index(citext)]
+                except:
+                    "Do nothing and move on. (we could not decrypt anything)"
                 citext = ''
  
     return decipher

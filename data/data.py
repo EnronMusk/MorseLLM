@@ -20,7 +20,7 @@ def createBatchTensor(train_pct : float,):
     Creates a train and test tokenized dataset read for training and generation.
     """
 
-    file = open(parent_directory + r'\\data\\shakespear_encrypted.txt')
+    file = open(parent_directory + r'\\data\\shakespeardata.txt')
     content = file.read()
     file.close()
 
@@ -28,8 +28,8 @@ def createBatchTensor(train_pct : float,):
     n = len(tok_content)
 
     #Create tain and test datasets
-    train = tok_content[math.floor(n * train_pct):]
-    test = tok_content[:math.floor(n * train_pct)]
+    train = tok_content[:math.floor(n * train_pct)]
+    test = tok_content[math.floor(n * train_pct):]
 
     def __assembleTensor(tokenized_data, type : str):
 
