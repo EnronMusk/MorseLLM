@@ -3,11 +3,16 @@ from torch import nn
 
 import os
 import sys
+from typing import Tuple
+
 
 #For safe imports of everything
 notebook_directory = os.getcwd()
 parent_directory = os.path.dirname(notebook_directory)
 sys.path.insert(False, parent_directory)
+
+from utils.plots import createDualLossPlot
+from utils.plots import createLossPlot
 
 file = open(parent_directory + r'\\data\\shakespeardata.txt')
 content = file.read()
@@ -18,8 +23,8 @@ chars = sorted(list(set(content)))
 #Global hyper-paramaters
 
 #attention
-hidden_size = 256
-attn_heads = 8
+hidden_size = 384
+attn_heads = 6
 head_size = hidden_size // attn_heads
 
 #feedforward
@@ -32,13 +37,16 @@ vocab_size = len(chars)
 
 #other
 batch_size = 64
-context_len = 512
+context_len = 256
 max_batches = 5000
 eval_iterative = 50
+num_epoch = 15
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-eta = 3e-4
+eta = 2e-4
 tempature = 1
+
+torch.manual_seed(1337)
 
 class feedForward(nn.Module):
     
@@ -51,7 +59,7 @@ class feedForward(nn.Module):
             nn.Linear(feedforward_multiplier * hidden_size, hidden_size)
             )
         
-    def forward(self, hidden_state):
+    def forward(self, hidden_state) -> torch.Tensor:
         return self.ffwd(hidden_state)
     
 class block(nn.Module):
@@ -64,12 +72,10 @@ class block(nn.Module):
         self.ln1 = nn.LayerNorm(hidden_size)
         self.ln2 = nn.LayerNorm(hidden_size)
 
-    def forward(self, embedding):
-        attn_embedding = self.mhead(embedding)
-        attn_embedding = embedding + self.ln1(attn_embedding) #LayerNorm + Add
+    def forward(self, embedding) -> torch.Tensor:
+        attn_embedding = embedding + self.mhead(self.ln1((embedding))) #LayerNorm + Add
 
-        new_embedding = self.ffwd(attn_embedding)
-        new_embedding = embedding + self.ln2(new_embedding) #LayerNorm + Add
+        new_embedding = attn_embedding + self.ffwd(self.ln2(attn_embedding)) #LayerNorm + Add
         return new_embedding
 
 class attnHead(nn.Module):
@@ -81,20 +87,22 @@ class attnHead(nn.Module):
         self.queries = nn.Linear(hidden_size, head_size, bias = False)
         self.values = nn.Linear(hidden_size, head_size, bias = False)
 
-    def forward(self, embeddings):
+    def forward(self, embeddings) -> torch.Tensor:
+
+        B, T, V = embeddings.shape #Grab the embeddings dimensions so we can perform self attention on dynamic sized inputs.
 
         keys = self.keys(embeddings) # B x T x head_size
         queries = self.queries(embeddings)
         values = self.values(embeddings)
 
         #attn scores
-        dot_product = (queries @ keys.transpose(-2, -1)).to(device) # B x T x T
+        dot_product = ((queries @ keys.transpose(-2, -1)) * (head_size)**-0.5) # B x T x T
         #print(dot_product.shape)
 
-        triangular_matrix_ones = torch.tril(torch.ones(context_len, context_len)).to(device)
+        triangular_matrix_ones = torch.tril(torch.ones(T, T, device=device))
 
         #Create masked attention
-        default_weights = (dot_product.masked_fill(triangular_matrix_ones == 0, float('-inf')) * (head_size)**-0.5).to(device)
+        default_weights = (dot_product.masked_fill(triangular_matrix_ones == 0, float('-inf')))
         #print("weights")
         #print(default_weights.shape)
 
@@ -114,7 +122,7 @@ class multiHeadAttention(nn.Module):
         self.mhead = nn.ModuleList([attnHead() for _ in range(attn_heads)])
         self.proj_matrix = nn.Linear(hidden_size, hidden_size, bias = False)
 
-    def forward(self, embedding):
+    def forward(self, embedding) -> torch.Tensor:
 
         m_attn_output = torch.cat([head.forward(embedding) for head in self.mhead], dim=-1) #Concatenate along batch
         #print("final output")
@@ -137,11 +145,22 @@ class transformerModel(nn.Module):
 
         self.lm_head = nn.Linear(hidden_size, vocab_size)
 
+        self.apply(self.initWeights) #initialize weights near zero
 
-    def forward(self, tokens):
+    def initWeights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+
+    def forward(self, tokens) -> torch.Tensor:
+        batch_size, context_len = tokens.shape
 
         token_embeddings = self.embedding(tokens)
-        position_embeddings = self.position_embedding(torch.arange(context_len, device=device))
+        position_embeddings = self.position_embedding(torch.arange(context_len, device=device)) 
         #print(token_embeddings.shape)
         #print(position_embeddings.shape)
         total_embeddings = token_embeddings + position_embeddings
@@ -154,12 +173,11 @@ class transformerModel(nn.Module):
         return logits
     
     @torch.no_grad()
-    def generate(self, tokens, max_new_tokens):
-        tokens = tokens.to(device)
+    def generate(self, tokens, max_new_tokens) -> torch.Tensor:
 
         for _ in range(max_new_tokens):
 
-            tokens_cropped = tokens[:, -context_len:]
+            tokens_cropped = tokens[:, -context_len:] #Only consider tokens up to the context length
             logits = self.forward(tokens_cropped)
             #print("logits")
             #print(logits)
@@ -168,8 +186,8 @@ class transformerModel(nn.Module):
             #print(logits)
 
             probs = torch.softmax(logits, dim=-1)
-            new_idex = torch.multinomial(probs, num_samples=1)
-            new_token = logits.argmax(-1).unsqueeze(0)
+            new_token = torch.multinomial(probs, num_samples=1)
+            #new_token = logits.argmax(-1).unsqueeze(0) #Choose the most likely token.
 
             #print(tokens)
             #print(new_token)
@@ -177,39 +195,50 @@ class transformerModel(nn.Module):
             tokens = torch.cat((tokens, new_token), dim=1)
             #print(tokens)
         return tokens
-
     
-    def trainModel(self, train, test) -> None:
+    def getParams(self) -> int:
+        return sum([p.numel() for p in self.parameters()])
+    
+    def trainModel(self, train, test, plot=True) -> None:
 
-        model = self.to(device)
-        params = list(model.parameters())
+        self.to(device)
+        params = self.parameters()
         optimizer = torch.optim.Adam(params=params, lr=eta)
 
         train_inputs = train['train_inputs']
         train_labels = train['train_targets']
 
-        for i, batch in enumerate(list(zip(train_inputs, train_labels))):
-            batch_inputs = batch[0].to(device)
-            batch_labels = batch[1].to(device)
+        #Initiliaze some arrays to keep track of model performance over time
+        batch_train_losses, epoch_train_losses, epoch_test_losses = [], [], []
 
 
-            #Evaluate and stop training settings
-            if i % eval_iterative == 0: self.evaluateModel(step=i, train=train, test=test)
-            if i > max_batches: break
+        for j in range(1, num_epoch+1):
+            for i, batch in enumerate(list(zip(train_inputs, train_labels))):
+                batch_inputs = batch[0].to(device)
+                batch_labels = batch[1].to(device)
 
-            batch_inputs = batch[0].to(device)
-            batch_labels = batch[1].to(device)
+                #Evaluate and stop training settings
+                if i > max_batches: break
 
-            logits, loss = self.computeLoss(inputs=batch_inputs, labels=batch_labels)
+                logits, loss = self.computeLoss(inputs=batch_inputs, labels=batch_labels)
+                #Training Core
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
 
-            #Training Core
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+                batch_train_losses.append(loss.item())
 
-        self.evaluateModel(step=i, train=train, test=test)
-    
-    def computeLoss(self, inputs, labels) -> None:
+            #Evaluate model every epoch and track results
+            train_mean, test_mean = self.evaluateModel(epoch=j, train=train, test=test)
+            epoch_test_losses.append(test_mean)
+            epoch_train_losses.append(train_mean)
+
+        #Plot model performance over time
+        if plot: 
+            createLossPlot(batch_train_losses)
+            createDualLossPlot(epoch_train_losses, epoch_test_losses)
+            
+    def computeLoss(self, inputs, labels) -> Tuple[torch.Tensor, torch.Tensor]:
 
         logits = self.forward(inputs) # B x T x C
 
@@ -218,24 +247,35 @@ class transformerModel(nn.Module):
 
         return logits, loss
     
+    #utility method for evaluating a dataset by type
+    def __evaluateData(self, inputs, outputs) -> float:
+
+        losses = 0
+        for i,batch in enumerate(list(zip(inputs, outputs))):
+                batch_inputs = batch[0].to(device)
+                batch_labels = batch[1].to(device)
+
+                logits, loss = self.computeLoss(inputs=batch_inputs, labels=batch_labels)
+                losses += loss.item()
+        
+        return round(losses / i, 4) #Return the mean.
+
     @torch.no_grad()
-    def evaluateModel(self, step : int, train, test) -> None:
+    def evaluateModel(self, epoch : int, train, test) -> Tuple[float, float]:
 
         self.eval()
-        total_loss = 0
+
         train_inputs = train['train_inputs']
         train_labels = train['train_targets']
 
-        for i,batch in enumerate(list(zip(train_inputs, train_labels))):
-            batch_inputs = batch[0].to(device)
-            batch_labels = batch[1].to(device)
+        test_inputs = test['test_inputs']
+        test_labels = test['test_targets']
 
-            logits, loss = self.computeLoss(inputs=batch_inputs, labels=batch_labels)
-            total_loss += loss.item()
+        train_mean = self.__evaluateData(train_inputs, train_labels)
+        test_mean = self.__evaluateData(test_inputs, test_labels)
 
-            if i > 20: break
-
-        print(f"Step {step} Training Loss: {total_loss}")
-
+        print(f"Epoch: {epoch} Training Loss: {train_mean} Test Loss: {test_mean}")
 
         self.train()
+
+        return train_mean, test_mean
