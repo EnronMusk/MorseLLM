@@ -1,29 +1,17 @@
-import os
-import sys
+import torch
 
-#For safe imports of everything
-notebook_directory = os.getcwd()
-parent_directory = os.path.dirname(notebook_directory)
-sys.path.insert(False, parent_directory)
-
-file = open(parent_directory + r'\\data\\shakespeardata.txt')
-content = file.read()
-file.close()
-
-chars = sorted(list(set(content)))
-
-# chars = " .-"
-
-def tokenize(string : str) -> list[int]:
+def tokenize(string : str, config) -> list[int]:
+    chars = config.chars
 
     encode_mapping = { ch:i for i,ch in enumerate(chars)}
     encode = lambda string : [encode_mapping[c] for c in string]
 
     return encode(string)
 
-def detokenize(string : str) -> list[int]:
+def detokenize(tensor : torch.Tensor, config) -> str:
+    chars = config.chars
 
     decode_mapping = { i:ch for i,ch in enumerate(chars)}
-    decode = lambda string : ''.join([decode_mapping[c] for c in string])
+    decode = lambda tensor : ''.join([decode_mapping[tok] for tok in tensor])
 
-    return decode(string)
+    return decode(tensor)
