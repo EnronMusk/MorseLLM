@@ -1,6 +1,6 @@
 ### **Morse LLM** ###
 
-I created the transformer architecture from scratch with all the supported functions and trained a model on some shakespear plays (500k chars). I created a nice notebook to go along with training analysis and tests.
+I created the transformer architecture from scratch with all the supported functions and trained a model on some shakespear plays (500k chars). I created a nice notebook to go along with training analysis and tests. There are two distinct models, one trained on just pure english characters and the other on morse encoded english characters. Both models have parameters counts around **10.3M** with configurations in `configs.py`.
 
 **Results**
 
