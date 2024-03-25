@@ -11,46 +11,16 @@ notebook_directory = os.getcwd()
 parent_directory = os.path.dirname(notebook_directory)
 sys.path.insert(False, parent_directory)
 
-from utils.plots import createDualLossPlot
-from utils.plots import createLossPlot
+from utils.plots import createDualLossPlot, createDualTrainPlot, createDualAccuracyPlot
 
-file = open(parent_directory + r'\\data\\shakespeardata.txt')
-content = file.read()
-file.close()
-
-chars = sorted(list(set(content)))
-
-#Global hyper-paramaters
-
-#attention
-hidden_size = 384
-attn_heads = 6
-head_size = hidden_size // attn_heads
-
-#feedforward
-feedforward_multiplier = 4
-
-#layers
-n_layers = 6
-vocab_size = 3
-vocab_size = len(chars)
-
-#other
-batch_size = 64
-context_len = 256
-max_batches = 5000
-eval_iterative = 50
-num_epoch = 15
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-eta = 2e-4
-tempature = 1
 
 torch.manual_seed(1337)
 
 class feedForward(nn.Module):
     
-    def __init__(self):
+    def __init__(self, hidden_size, feedforward_multiplier):
         super().__init__()
 
         self.ffwd = nn.Sequential(
@@ -64,11 +34,11 @@ class feedForward(nn.Module):
     
 class block(nn.Module):
 
-    def __init__(self):
+    def __init__(self, hidden_size, attn_heads, head_size, feedforward_multiplier):
         super().__init__()
 
-        self.mhead = multiHeadAttention()
-        self.ffwd = feedForward()
+        self.mhead = multiHeadAttention(hidden_size, attn_heads, head_size)
+        self.ffwd = feedForward(hidden_size, feedforward_multiplier)
         self.ln1 = nn.LayerNorm(hidden_size)
         self.ln2 = nn.LayerNorm(hidden_size)
 
@@ -80,12 +50,13 @@ class block(nn.Module):
 
 class attnHead(nn.Module):
     
-    def __init__(self):
+    def __init__(self, hidden_size, head_size):
         super().__init__()  
 
         self.keys = nn.Linear(hidden_size, head_size, bias = False)
         self.queries = nn.Linear(hidden_size, head_size, bias = False)
         self.values = nn.Linear(hidden_size, head_size, bias = False)
+
 
     def forward(self, embeddings) -> torch.Tensor:
 
@@ -96,7 +67,7 @@ class attnHead(nn.Module):
         values = self.values(embeddings)
 
         #attn scores
-        dot_product = ((queries @ keys.transpose(-2, -1)) * (head_size)**-0.5) # B x T x T
+        dot_product = ((queries @ keys.transpose(-2, -1)) * (keys.shape[-1])**-0.5) # B x T x T
         #print(dot_product.shape)
 
         triangular_matrix_ones = torch.tril(torch.ones(T, T, device=device))
@@ -117,9 +88,9 @@ class attnHead(nn.Module):
     
 class multiHeadAttention(nn.Module):
 
-    def __init__(self):
+    def __init__(self, hidden_size, attn_heads, head_size):
         super().__init__()
-        self.mhead = nn.ModuleList([attnHead() for _ in range(attn_heads)])
+        self.mhead = nn.ModuleList([attnHead(hidden_size, head_size) for _ in range(attn_heads)])
         self.proj_matrix = nn.Linear(hidden_size, hidden_size, bias = False)
 
     def forward(self, embedding) -> torch.Tensor:
@@ -132,18 +103,20 @@ class multiHeadAttention(nn.Module):
 
 class transformerModel(nn.Module):
 
-    def __init__(self):
+    def __init__(self, config):
         super().__init__()
 
-        self.embedding = nn.Embedding(vocab_size, hidden_size)
-        self.position_embedding = nn.Embedding(context_len, hidden_size)
+        self.config = config
 
-        self.ln = nn.LayerNorm(hidden_size)
+        self.embedding = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.position_embedding = nn.Embedding(config.context_len, config.hidden_size)
 
-        blocks_to_add = [block() for _ in range(n_layers)]
+        self.ln = nn.LayerNorm(config.hidden_size)
+
+        blocks_to_add = [block(config.hidden_size, config.attn_heads, config.head_size, config.feedforward_multiplier) for _ in range(config.n_layers)]
         self.blocks = nn.Sequential(*blocks_to_add) #Set up the layers here
 
-        self.lm_head = nn.Linear(hidden_size, vocab_size)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size)
 
         self.apply(self.initWeights) #initialize weights near zero
 
@@ -177,7 +150,7 @@ class transformerModel(nn.Module):
 
         for _ in range(max_new_tokens):
 
-            tokens_cropped = tokens[:, -context_len:] #Only consider tokens up to the context length
+            tokens_cropped = tokens[:, -self.config.context_len:] #Only consider tokens up to the context length
             logits = self.forward(tokens_cropped)
             #print("logits")
             #print(logits)
@@ -201,67 +174,94 @@ class transformerModel(nn.Module):
     
     def trainModel(self, train, test, plot=True) -> None:
 
+        """" Trains the model and plots results. """
+
         self.to(device)
+
+        config = self.config
         params = self.parameters()
-        optimizer = torch.optim.Adam(params=params, lr=eta)
+        optimizer = torch.optim.Adam(params=params, lr=config.eta)
 
         train_inputs = train['train_inputs']
         train_labels = train['train_targets']
 
-        #Initiliaze some arrays to keep track of model performance over time
-        batch_train_losses, epoch_train_losses, epoch_test_losses = [], [], []
+        #Initialize some arrays to keep track of model performance over time
+        batch_train_losses, epoch_train_losses, epoch_test_losses, batch_train_acc, epoch_train_acc, epoch_test_acc, = [], [], [], [], [], []
 
-
-        for j in range(1, num_epoch+1):
+        print("\u2714 Starting training...")
+        for j in range(1, config.num_epoch+1):
             for i, batch in enumerate(list(zip(train_inputs, train_labels))):
                 batch_inputs = batch[0].to(device)
                 batch_labels = batch[1].to(device)
 
                 #Evaluate and stop training settings
-                if i > max_batches: break
+                #if i > config.max_batches: break
 
-                logits, loss = self.computeLoss(inputs=batch_inputs, labels=batch_labels)
+                logits, loss, acc = self.computeLoss(inputs=batch_inputs, labels=batch_labels)
                 #Training Core
                 loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
 
                 batch_train_losses.append(loss.item())
+                batch_train_acc.append(acc)
 
             #Evaluate model every epoch and track results
-            train_mean, test_mean = self.evaluateModel(epoch=j, train=train, test=test)
-            epoch_test_losses.append(test_mean)
-            epoch_train_losses.append(train_mean)
+            train_loss, test_loss, train_acc, test_acc = self.evaluateModel(epoch=j, train=train, test=test)
+            epoch_test_losses.append(test_loss)
+            epoch_train_losses.append(train_loss)
+
+            epoch_test_acc.append(test_acc)
+            epoch_train_acc.append(train_acc)
 
         #Plot model performance over time
         if plot: 
-            createLossPlot(batch_train_losses)
+            createDualTrainPlot(batch_train_losses, batch_train_acc)
             createDualLossPlot(epoch_train_losses, epoch_test_losses)
+            createDualAccuracyPlot(epoch_train_acc, epoch_test_acc)
             
-    def computeLoss(self, inputs, labels) -> Tuple[torch.Tensor, torch.Tensor]:
+    def computeLoss(self, inputs, labels) -> Tuple[torch.Tensor, torch.Tensor, float]:
 
+        """ returns the logits, loss and the accuracy respectively. """
+
+        #labels are B x T
+        #inputs are B x T x C
+
+        config = self.config
         logits = self.forward(inputs) # B x T x C
 
         loss_function = nn.CrossEntropyLoss()
-        loss = loss_function(logits.view(batch_size * context_len, vocab_size), labels.view(batch_size * context_len))
+        loss = loss_function(logits.view(config.batch_size * config.context_len, config.vocab_size), labels.view(config.batch_size * config.context_len))
 
-        return logits, loss
+        pred = logits.argmax(dim=-1) # B x T x C ---> B x T
+        correct_tokens = (pred == labels).sum().item() # B x T == B x T
+        total_tokens = labels.numel()
+
+        return logits, loss, correct_tokens/total_tokens
     
     #utility method for evaluating a dataset by type
-    def __evaluateData(self, inputs, outputs) -> float:
+    def __evaluateData(self, inputs, outputs) -> Tuple[float, float]:
+
+        """ Helper function to evalute the model. Evaluates a dataset of batches.
+        \n returns mean loss and accuracy respectively"""
 
         losses = 0
+        accuracy = 0
         for i,batch in enumerate(list(zip(inputs, outputs))):
                 batch_inputs = batch[0].to(device)
                 batch_labels = batch[1].to(device)
 
-                logits, loss = self.computeLoss(inputs=batch_inputs, labels=batch_labels)
+                logits, loss, acc = self.computeLoss(inputs=batch_inputs, labels=batch_labels)
                 losses += loss.item()
+                accuracy += acc #is a float
         
-        return round(losses / i, 4) #Return the mean.
+        return round(losses / i, 4), round(accuracy / i, 4) #Return the means.
 
     @torch.no_grad()
     def evaluateModel(self, epoch : int, train, test) -> Tuple[float, float]:
+
+        """ evaluates the models losses and accuracy for both train and test.
+            \n returns train/test losses and train/test acurracy respectively."""
 
         self.eval()
 
@@ -271,11 +271,12 @@ class transformerModel(nn.Module):
         test_inputs = test['test_inputs']
         test_labels = test['test_targets']
 
-        train_mean = self.__evaluateData(train_inputs, train_labels)
-        test_mean = self.__evaluateData(test_inputs, test_labels)
+        train_mean, train_acc = self.__evaluateData(train_inputs, train_labels)
+        test_mean, test_acc = self.__evaluateData(test_inputs, test_labels)
 
-        print(f"Epoch: {epoch} Training Loss: {train_mean} Test Loss: {test_mean}")
+        #Print status update of losses + accuracy
+        print(f"Epoch: {epoch} Training Loss: {train_mean} Test Loss: {test_mean} Train Accuracy {train_acc} Test Accuracy {test_acc}")
 
         self.train()
 
-        return train_mean, test_mean
+        return train_mean, test_mean, train_acc, test_acc
