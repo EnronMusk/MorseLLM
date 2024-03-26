@@ -22,9 +22,9 @@ class modelConfig():
         self.tempature = 1
 
         #data related
-        self.chars = ['\n', ' ', '!', '"', '&', "'", '(', ')', ',', '-', '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '>', '?', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[', ']', '_', '`', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '|', '}']
+        self.chars = ['(', ':', "'", '_', 'H', 'L', 'I', '1', 'W', 'K', '3', '.', '8', 'G', '9', 'R', ';', '4', 'J', '?', '0', 'P', 'U', '&', '5', '7', 'V', '-', ' ', 'Q', 'O', 'Y', ')', 'D', 'Z', '\n', '"', 'E', '2', 'B', 'A', 'T', '6', 'F', 'C', 'X', 'S', '!', ',', 'M', 'N']
         self.vocab_size = len(self.chars)
-        self.directory = r'\\data\\shakespeardata.txt'
+        self.directory = r'\\data\\shakespear_upper.txt'
         self.total_tokens = None #Found in the tokenizer. Used to justify the context length increase.
 
 class modelConfigMorse():

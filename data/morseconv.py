@@ -1,6 +1,17 @@
-def createMorseShakespear() -> None:
+def upperfyShapespear() -> None:
 
     file = open('shakespeardata.txt')
+    content = file.read()
+    file.close()
+
+    en_content = upperify(content)
+    with open('shakespear_upper.txt', 'w') as file:
+        file.write(en_content)
+    file.close()
+
+def createMorseShakespear() -> None:
+
+    file = open('shakespear_upper.txt')
     content = file.read()
     file.close()
 
@@ -8,6 +19,7 @@ def createMorseShakespear() -> None:
     with open('shakespear_encrypted.txt', 'w') as file:
         file.write(en_content)
     file.close()
+
 
 #Huffman encoding
 MORSE_CODE_DICT = {
@@ -21,6 +33,15 @@ MORSE_CODE_DICT = {
     ')': '-.--.-', '&': '.-...', ':': '---...', ';': '-.-.-.', '=': '-...-', '+': '.-.-.', '-': '-....-',
     '_': '..--.-', '"': '.-..-.', '$': '...-..-', '@': '.--.-.', ' ': '/', '\n' : '//'
 }
+
+def upperify(text):
+    upperfied_text = ''
+    for char in text.upper():
+        if char in MORSE_CODE_DICT:
+            upperfied_text += char.upper()
+        else: #If not in the scheme, simply remove it
+            upperfied_text += ""
+    return upperfied_text
 
 def encrypt(text):
     encrypted_text = ''
